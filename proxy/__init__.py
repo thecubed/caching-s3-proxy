@@ -9,10 +9,13 @@ import mimetypes
 
 
 class CachingS3Proxy(object):
-    def __init__(self, bucket=None, capacity=(10*10**9), cache_dir=tempfile.gettempdir(), auth=None):
+    def __init__(self, bucket=None, no_cache=False, capacity=(10*10**9), cache_dir=tempfile.gettempdir(), auth=None):
         logging.basicConfig(level=logging.INFO)
         self.logger = logging.getLogger(__name__)
         self.bucket = bucket
+        self.no_cache = no_cache
+        if self.no_cache:
+            self.logger.info("Cache disabled!")
         self.cache = LRUCache(capacity, cache_dir)
         self.auth = auth
 
@@ -54,7 +57,7 @@ class CachingS3Proxy(object):
             status = '404 NOT FOUND'
             response_headers = [('Content-type', 'text/plain')]
             start_response(status, response_headers)
-            return []
+            return ['404 Not Found']
 
     def check_auth(self, header):
         if not header:
@@ -66,24 +69,31 @@ class CachingS3Proxy(object):
 
         return username == self.auth.get('username', '') and password == self.auth.get('password', '')
 
-
     def fetch_s3_object(self, bucket, key):
-        m = hashlib.md5()
-        m.update(bucket+key)
-        cache_key = m.hexdigest()
+        if not self.no_cache:
+            m = hashlib.md5()
+            m.update(bucket+key)
+            cache_key = m.hexdigest()
 
-        conn = boto.connect_s3()
-        if cache_key in self.cache:
-            self.logger.debug('cache hit for %s' % cache_key)
-            return self.cache[cache_key]
-        else:
-            self.logger.debug('cache miss for %s' % cache_key)
+            if cache_key in self.cache:
+                self.logger.debug('cache hit for %s' % cache_key)
+                return self.cache[cache_key]
+            else:
+                self.logger.debug('cache miss for %s' % cache_key)
 
-        b = conn.get_bucket(bucket)
-        k = b.get_key(key)
-        if k:
-            obj = k.get_contents_as_string()
-            self.cache[cache_key] = obj
-            return obj
+            conn = boto.connect_s3()
+            b = conn.get_bucket(bucket)
+            k = b.get_key(key)
+            if k:
+                obj = k.get_contents_as_string()
+                self.cache[cache_key] = obj
+                return obj
+            else:
+                return None
         else:
-            return None
+            conn = boto.connect_s3()
+            k = conn.get_bucket(bucket).get_key(key)
+            if k:
+                return k.get_contents_as_string()
+            else:
+                return None
