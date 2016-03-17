@@ -23,17 +23,17 @@ class CachingS3Proxy(object):
         """proxy private s3 buckets"""
         path_info = environ.get('PATH_INFO', '')
 
-        if self.auth and not self.check_auth(environ.get('HTTP_AUTHORIZATION')):
-            start_response('401 Authentication Required',
-                           [('Content-Type', 'text/plain'),
-                            ('WWW-Authenticate', 'Basic realm="Login"')])
-            return ['Login']
-
         if path_info == '/':
             status = '200 OK'
             response_headers = [('Content-type', 'text/plain')]
             start_response(status, response_headers)
             return ['Caching S3 Proxy']
+
+        if self.auth and not self.check_auth(environ.get('HTTP_AUTHORIZATION')):
+            start_response('401 Authentication Required',
+                       [('Content-Type', 'text/plain'),
+                        ('WWW-Authenticate', 'Basic realm="Login"')])
+            return ['Login']
 
         path_info = path_info.lstrip('/')
 
