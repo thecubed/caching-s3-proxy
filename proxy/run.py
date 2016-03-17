@@ -6,9 +6,15 @@ from wsgiref.simple_server import make_server
 
 
 def main():
+    bucket = os.environ.get('BUCKET')
     capacity = int(os.environ.get('CAPACITY', 1000000000))
     cache_dir = os.environ.get('CACHEDIR', tempfile.gettempdir())
-    p = CachingS3Proxy(capacity, cache_dir)
+    auth_config = {
+        "username": os.environ.get('AUTH_USER', ''),
+        "password": os.environ.get('AUTH_PASS', '')
+    } if os.environ.get('USE_AUTH') else None
+
+    p = CachingS3Proxy(bucket, capacity, cache_dir, auth_config)
     port = int(os.environ.get('PORT', 8000))
     httpd = make_server('', port, p.proxy_s3_bucket)
     print 'Serving HTTP on port %s...' % port

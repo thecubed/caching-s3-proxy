@@ -4,17 +4,28 @@ import hashlib
 import logging
 from proxy.cache import LRUCache
 import tempfile
+from base64 import b64decode
+import mimetypes
 
 
 class CachingS3Proxy(object):
-    def __init__(self, capacity=(10*10**9), cache_dir=tempfile.gettempdir()):
+    def __init__(self, bucket=None, capacity=(10*10**9), cache_dir=tempfile.gettempdir(), auth=None):
         logging.basicConfig(level=logging.INFO)
         self.logger = logging.getLogger(__name__)
+        self.bucket = bucket
         self.cache = LRUCache(capacity, cache_dir)
+        self.auth = auth
 
     def proxy_s3_bucket(self, environ, start_response):
         """proxy private s3 buckets"""
         path_info = environ.get('PATH_INFO', '')
+
+        if self.auth and not self.check_auth(environ.get('HTTP_AUTHORIZATION')):
+            start_response('401 Authentication Required',
+                           [('Content-Type', 'text/plain'),
+                            ('WWW-Authenticate', 'Basic realm="Login"')])
+            return ['Login']
+
         if path_info == '/':
             status = '200 OK'
             response_headers = [('Content-type', 'text/plain')]
@@ -22,11 +33,21 @@ class CachingS3Proxy(object):
             return ['Caching S3 Proxy']
 
         path_info = path_info.lstrip('/')
-        (bucket, key) = path_info.split('/', 1)
+
+        if self.bucket:
+            bucket = self.bucket
+            key = path_info
+        else:
+            (bucket, key) = path_info.split('/', 1)
+
+        if key[-1:] == '/':
+            key += 'index.html'
+
         s3_result = self.fetch_s3_object(bucket, key)
         if s3_result:
             status = '200 OK'
-            response_headers = [('Content-type', 'text/plain')]
+            type = mimetypes.guess_type(key)[0]
+            response_headers = [('Content-type', type)] if type else []
             start_response(status, response_headers)
             return [s3_result]
         else:
@@ -34,6 +55,17 @@ class CachingS3Proxy(object):
             response_headers = [('Content-type', 'text/plain')]
             start_response(status, response_headers)
             return []
+
+    def check_auth(self, header):
+        if not header:
+            return False
+
+        _, encoded = header.split(None, 1)
+        decoded = b64decode(encoded).decode('UTF-8')
+        username, password = decoded.split(':', 1)
+
+        return username == self.auth.get('username', '') and password == self.auth.get('password', '')
+
 
     def fetch_s3_object(self, bucket, key):
         m = hashlib.md5()
