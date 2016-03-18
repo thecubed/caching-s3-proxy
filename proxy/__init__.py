@@ -5,18 +5,19 @@ import logging
 from proxy.cache import LRUCache
 import tempfile
 from base64 import b64decode
-import mimetypes
 
 
 class CachingS3Proxy(object):
-    def __init__(self, bucket=None, no_cache=False, capacity=(10*10**9), cache_dir=tempfile.gettempdir(), auth=None):
+    def __init__(self, bucket=None, no_cache=False, capacity=(10*10**9),
+                 cache_dir=tempfile.gettempdir(), auth=None):
         logging.basicConfig(level=logging.INFO)
         self.logger = logging.getLogger(__name__)
         self.bucket = bucket
         self.no_cache = no_cache
         if self.no_cache:
             self.logger.info("Cache disabled!")
-        self.cache = LRUCache(capacity, cache_dir)
+        else:
+            self.cache = LRUCache(capacity, cache_dir)
         self.auth = auth
 
     def proxy_s3_bucket(self, environ, start_response):
@@ -46,11 +47,11 @@ class CachingS3Proxy(object):
         if key[-1:] == '/':
             key += 'index.html'
 
-        s3_result = self.fetch_s3_object(bucket, key)
+        s3_result, s3_meta = self.fetch_s3_object(bucket, key)
         if s3_result:
             status = '200 OK'
-            type = mimetypes.guess_type(key)[0]
-            response_headers = [('Content-type', type)] if type else []
+            response_headers = [('cache-control', 'max-age=86400')] if not s3_meta.get('cache-control') else []
+            response_headers += [(key, str(value)) for key, value in s3_meta.iteritems()]
             start_response(status, response_headers)
             return [s3_result]
         else:
@@ -69,6 +70,11 @@ class CachingS3Proxy(object):
 
         return username == self.auth.get('username', '') and password == self.auth.get('password', '')
 
+    def build_s3_meta(self, key):
+        return {
+            n.replace('_', '-'): key.__dict__.get(n.replace('-', '_')) for n in key.base_fields if key.__dict__.get(n.replace('-', '_'))
+        }
+
     def fetch_s3_object(self, bucket, key):
         if not self.no_cache:
             m = hashlib.md5()
@@ -77,7 +83,9 @@ class CachingS3Proxy(object):
 
             if cache_key in self.cache:
                 self.logger.debug('cache hit for %s' % cache_key)
-                return self.cache[cache_key]
+                obj = self.cache[cache_key]
+                print obj
+                return obj
             else:
                 self.logger.debug('cache miss for %s' % cache_key)
 
@@ -85,15 +93,16 @@ class CachingS3Proxy(object):
             b = conn.get_bucket(bucket)
             k = b.get_key(key)
             if k:
-                obj = k.get_contents_as_string()
+                obj = (k.get_contents_as_string(), self.build_s3_meta(k))
                 self.cache[cache_key] = obj
                 return obj
             else:
-                return None
+                return None, None
         else:
             conn = boto.connect_s3()
             k = conn.get_bucket(bucket).get_key(key)
             if k:
-                return k.get_contents_as_string()
+                meta = self.build_s3_meta(k)
+                return k.get_contents_as_string(), meta
             else:
-                return None
+                return None, None

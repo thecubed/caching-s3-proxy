@@ -6,7 +6,7 @@ def application(environ, start_response):
     bucket = os.environ.get('BUCKET')
     no_cache = True if os.environ.get('NO_CACHE') else False
     capacity = int(os.environ.get('CAPACITY', 1000000000))
-    cache_dir = os.environ.get('CACHEDIR', tempfile.gettempdir())
+    cache_dir = os.environ.get('CACHEDIR')
     auth_config = {
         "username": os.environ.get('AUTH_USER', ''),
         "password": os.environ.get('AUTH_PASS', '')

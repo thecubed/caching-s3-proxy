@@ -42,7 +42,7 @@ class LRUCache(object):
             self.cache.pop(key)
             size = os.path.getsize(abspath)
             with open(abspath, 'r') as cachefile:
-                value = cachefile.read()
+                value = pickle.load(cachefile)
                 # bump this to the top, since it was accessed most recently
                 self.cache[key] = size
                 pickle.dump((self.total_size, self.cache),
@@ -63,7 +63,7 @@ class LRUCache(object):
                 self.logger.info('evicted %s from cache' % cache_key)
                 self.total_size -= size
             with open(abspath, 'w') as cachefile:
-                cachefile.write(value)
+                pickle.dump(value, cachefile)
             size = os.path.getsize(abspath)
             self.cache[key] = size
             self.total_size += size
